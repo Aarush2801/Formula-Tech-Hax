@@ -531,6 +531,46 @@ FOLLOWING_TIME_GAP = declare(
 )
 
 
+# --------------------------------------------------------------------------
+# Apex Passport
+# --------------------------------------------------------------------------
+PASSPORT_PARTS = declare(
+    "passport_parts",
+    ["suspension_fl", "suspension_fr", "suspension_rl", "suspension_rr",
+     "wheels", "brakes", "harness", "seat"],
+    unit="-", kind="assumption", group="Apex Passport",
+    label="Tracked parts",
+    note="The set of components the passport tracks wear and replacement "
+         "history for. A real team's parts list is far larger; this is a "
+         "prototype-scale subset chosen to cover the components the "
+         "simulator's own contact/kerb-strike events can plausibly load.",
+)
+PASSPORT_PART_COSTS = declare(
+    "passport_part_costs",
+    {"suspension_fl": 8_500, "suspension_fr": 8_500, "suspension_rl": 7_200,
+     "suspension_rr": 7_200, "wheels": 2_400, "brakes": 5_600, "harness": 900,
+     "seat": 1_800},
+    unit="USD", kind="assumption", group="Apex Passport",
+    label="Illustrative part replacement cost",
+    note="Round-number placeholders for a cost forecast, not real supplier "
+         "prices. Every cost figure the passport reports is built from these "
+         "and is clearly an estimate, not a quote.",
+)
+PASSPORT_LIFE_AMBER_PCT = declare(
+    "passport_life_amber_pct", 70.0, unit="%", kind="assumption",
+    group="Apex Passport", label="Part life-used amber threshold",
+    note="A part's status is green below this, amber between this and the "
+         "red threshold, red above it. Illustrative, not a manufacturer "
+         "service-life figure.",
+    range=(40.0, 90.0),
+)
+PASSPORT_LIFE_RED_PCT = declare(
+    "passport_life_red_pct", 90.0, unit="%", kind="assumption",
+    group="Apex Passport", label="Part life-used red threshold",
+    range=(60.0, 100.0),
+)
+
+
 def snapshot() -> list[dict]:
     """Serialise the registry for the Model Assumptions screen."""
     out = []
