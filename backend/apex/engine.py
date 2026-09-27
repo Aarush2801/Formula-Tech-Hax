@@ -864,10 +864,17 @@ class RaceEngine:
                     lateral_grip_budget=round(float(lat_capacity[i]), 3),
                 )
                 if self.team_idx is not None and self.team_idx in (int(i), int(j)):
+                    other_idx = int(j if i == self.team_idx else i)
+                    # Which side of the team car the impact landed on, from the
+                    # sign of the other car's lateral offset relative to it (d
+                    # is + left, per the module docstring) -- used to share
+                    # wear between the correct pair of suspension corners
+                    # rather than splitting it blindly across all four.
+                    side = "left" if self.d[other_idx] >= self.d[self.team_idx] else "right"
                     self.team_contacts.append(dict(
                         t=round(float(t), 3), segment_index=int(seg[i]),
                         location=self.track.segments[int(seg[i])].name,
-                        other_driver=self.profiles[int(j if i == self.team_idx else i)].id,
+                        other_driver=self.profiles[other_idx].id, side=side,
                         severe=bool(severe), impact_speed=round(cs, 2),
                         **{k: detail[k] for k in
                            ("longitudinal_overlap", "lateral_overlap_depth", "in_corner")},
