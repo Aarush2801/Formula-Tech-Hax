@@ -177,6 +177,70 @@ CREATE TABLE IF NOT EXISTS experiments (
 );
 """
 
+# --------------------------------------------------------------------------
+# Apex Passport -- new tables only, additive. Never alters the tables above.
+# --------------------------------------------------------------------------
+PASSPORT_SCHEMA = """
+CREATE TABLE IF NOT EXISTS cars (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    class TEXT NOT NULL,
+    car_profile_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS parts (
+    car_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    life_used_pct REAL NOT NULL DEFAULT 0,
+    part_cost REAL NOT NULL,
+    status TEXT NOT NULL DEFAULT 'green',
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (car_id, name),
+    FOREIGN KEY (car_id) REFERENCES cars(id)
+);
+
+CREATE TABLE IF NOT EXISTS history_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    car_id TEXT NOT NULL,
+    time TEXT NOT NULL,
+    type TEXT NOT NULL,
+    details_json TEXT NOT NULL,
+    hash TEXT NOT NULL,
+    prev_hash TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    FOREIGN KEY (car_id) REFERENCES cars(id)
+);
+CREATE INDEX IF NOT EXISTS idx_hist_car ON history_events(car_id, seq);
+
+CREATE TABLE IF NOT EXISTS stress_tests (
+    id TEXT PRIMARY KEY,
+    car_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    track_id TEXT NOT NULL,
+    weather TEXT NOT NULL,
+    n_races INTEGER NOT NULL,
+    batch_id TEXT,
+    status TEXT NOT NULL DEFAULT 'running',
+    results_json TEXT,
+    FOREIGN KEY (car_id) REFERENCES cars(id)
+);
+CREATE INDEX IF NOT EXISTS idx_stress_car ON stress_tests(car_id);
+
+CREATE TABLE IF NOT EXISTS incidents (
+    id TEXT PRIMARY KEY,
+    car_id TEXT NOT NULL,
+    reported_at TEXT NOT NULL,
+    occurred_at TEXT NOT NULL,
+    description TEXT,
+    affected_parts_json TEXT,
+    before_snapshot_json TEXT NOT NULL,
+    history_event_id INTEGER,
+    FOREIGN KEY (car_id) REFERENCES cars(id)
+);
+CREATE INDEX IF NOT EXISTS idx_incident_car ON incidents(car_id);
+"""
+
 
 def utcnow() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -189,6 +253,7 @@ class Store:
         self._local = threading.local()
         with self.connect() as c:
             c.executescript(SCHEMA)
+            c.executescript(PASSPORT_SCHEMA)
         self._migrate()
 
     # ------------------------------------------------------------------

@@ -531,6 +531,146 @@ FOLLOWING_TIME_GAP = declare(
 )
 
 
+# --------------------------------------------------------------------------
+# Apex Passport
+# --------------------------------------------------------------------------
+PASSPORT_PARTS = declare(
+    "passport_parts",
+    ["suspension_fl", "suspension_fr", "suspension_rl", "suspension_rr",
+     "wheels", "brakes", "harness", "seat"],
+    unit="-", kind="assumption", group="Apex Passport",
+    label="Tracked parts",
+    note="The set of components the passport tracks wear and replacement "
+         "history for. A real team's parts list is far larger; this is a "
+         "prototype-scale subset chosen to cover the components the "
+         "simulator's own contact/kerb-strike events can plausibly load.",
+)
+PASSPORT_PART_COSTS = declare(
+    "passport_part_costs",
+    {"suspension_fl": 8_500, "suspension_fr": 8_500, "suspension_rl": 7_200,
+     "suspension_rr": 7_200, "wheels": 2_400, "brakes": 5_600, "harness": 900,
+     "seat": 1_800},
+    unit="USD", kind="assumption", group="Apex Passport",
+    label="Illustrative part replacement cost",
+    note="Round-number placeholders for a cost forecast, not real supplier "
+         "prices. Every cost figure the passport reports is built from these "
+         "and is clearly an estimate, not a quote.",
+)
+PASSPORT_LIFE_AMBER_PCT = declare(
+    "passport_life_amber_pct", 70.0, unit="%", kind="assumption",
+    group="Apex Passport", label="Part life-used amber threshold",
+    note="A part's status is green below this, amber between this and the "
+         "red threshold, red above it. Illustrative, not a manufacturer "
+         "service-life figure.",
+    range=(40.0, 90.0),
+)
+PASSPORT_LIFE_RED_PCT = declare(
+    "passport_life_red_pct", 90.0, unit="%", kind="assumption",
+    group="Apex Passport", label="Part life-used red threshold",
+    range=(60.0, 100.0),
+)
+
+# --- Wear conversion (simulated kerb strikes / contacts -> % life used) ---
+# All of this is a modelling choice, not a measured wear curve. The intent is
+# only that harder hits cost much more life (a squared severity/speed term)
+# and that a hit's load lands on the side of the car it actually struck.
+KERB_WEAR_BASE_PCT = declare(
+    "kerb_wear_base_pct", 0.15, unit="% life / strike", kind="assumption",
+    group="Apex Passport", label="Kerb strike base wear",
+    note="Flat wear applied per kerb strike regardless of severity, before "
+         "the severity term below is added.",
+    range=(0.0, 2.0),
+)
+KERB_WEAR_SEVERITY_GAIN = declare(
+    "kerb_wear_severity_gain", 2.5, unit="% life / strike", kind="assumption",
+    group="Apex Passport", label="Kerb strike severity wear gain",
+    note="Additional wear is severity-squared times this gain, so a hard kerb "
+         "strike costs far more than a graze -- 'harder hits add much more "
+         "wear' as a deliberate nonlinearity, not a linear scale-up.",
+    range=(0.0, 10.0),
+)
+KERB_WEAR_WHEEL_SHARE = declare(
+    "kerb_wear_wheel_share", 0.35, unit="fraction", kind="assumption",
+    group="Apex Passport", label="Kerb strike wheel wear share",
+    note="Fraction of a kerb strike's wear also applied to 'wheels', on top "
+         "of (not instead of) the two same-side suspension corners.",
+    range=(0.0, 1.0),
+)
+CONTACT_WEAR_BASE_PCT = declare(
+    "contact_wear_base_pct", 0.5, unit="% life / contact", kind="assumption",
+    group="Apex Passport", label="Contact base wear",
+    range=(0.0, 5.0),
+)
+CONTACT_WEAR_SPEED_GAIN = declare(
+    "contact_wear_speed_gain", 0.35, unit="% life per m/s", kind="assumption",
+    group="Apex Passport", label="Contact impact-speed wear gain",
+    note="Wear grows with impact speed; a SEVERE contact (see "
+         "CONTACT_SEVERE_CLOSING_SPEED in the core assumptions) additionally "
+         "multiplies the result by CONTACT_WEAR_SEVERE_MULTIPLIER.",
+    range=(0.0, 2.0),
+)
+CONTACT_WEAR_SEVERE_MULTIPLIER = declare(
+    "contact_wear_severe_multiplier", 3.0, unit="-", kind="assumption",
+    group="Apex Passport", label="Severe-contact wear multiplier",
+    range=(1.0, 8.0),
+)
+CONTACT_WEAR_SUSPENSION_SHARE = declare(
+    "contact_wear_suspension_share", 0.6, unit="fraction", kind="assumption",
+    group="Apex Passport", label="Contact wear share to same-side suspension",
+    note="Split evenly between the two suspension corners on the side the "
+         "other car struck. The remainder goes to wheels and brakes below.",
+    range=(0.0, 1.0),
+)
+CONTACT_WEAR_WHEEL_SHARE = declare(
+    "contact_wear_wheel_share", 0.30, unit="fraction", kind="assumption",
+    group="Apex Passport", label="Contact wear share to wheels",
+    range=(0.0, 1.0),
+)
+CONTACT_WEAR_BRAKE_SHARE = declare(
+    "contact_wear_brake_share", 0.10, unit="fraction", kind="assumption",
+    group="Apex Passport", label="Contact wear share to brakes",
+    note="Suspension + wheel + brake shares are asserted to sum to 1.0 in "
+         "tests/test_wear.py.",
+    range=(0.0, 1.0),
+)
+CONTACT_REPAIR_COST_LIGHT = declare(
+    "contact_repair_cost_light", 2_800, unit="USD", kind="assumption",
+    group="Apex Passport", label="Illustrative repair cost, light contact",
+    range=(0, 20_000),
+)
+CONTACT_REPAIR_COST_SEVERE = declare(
+    "contact_repair_cost_severe", 14_500, unit="USD", kind="assumption",
+    group="Apex Passport", label="Illustrative repair cost, severe contact/collision",
+    range=(0, 100_000),
+)
+POLICY_INSPECTION_INTERVAL_RACES = declare(
+    "policy_inspection_interval_races", 5, unit="races", kind="assumption",
+    group="Apex Passport", label="Required inspection interval",
+    note="Illustrative policy condition: an inspection history event is "
+         "expected at least this often, counted in 'race' history events "
+         "since the last 'inspection' event. Not a real insurer's policy "
+         "wording.",
+    range=(1, 20),
+)
+POLICY_INSPECTION_WARNING_MARGIN = declare(
+    "policy_inspection_warning_margin", 2, unit="races", kind="assumption",
+    group="Apex Passport", label="Inspection-due warning margin",
+    note="A condition shows 'at risk' this many races before it would be "
+         "'breached', so the passport can warn ahead of a lapse rather than "
+         "only reporting one after it happens.",
+    range=(0, 10),
+)
+STRESS_TEST_DEFAULT_N_RACES = declare(
+    "stress_test_default_n_races", 200, unit="races", kind="assumption",
+    group="Apex Passport", label="Default stress-test race count",
+    note="Kept far below a 10,000-run Monte Carlo batch so a stress test "
+         "returns in seconds; enough races that the median/range on each "
+         "part's predicted life used is a meaningful spread rather than one "
+         "draw.",
+    range=(20, 2000),
+)
+
+
 def snapshot() -> list[dict]:
     """Serialise the registry for the Model Assumptions screen."""
     out = []

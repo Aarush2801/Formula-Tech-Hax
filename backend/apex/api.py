@@ -20,7 +20,6 @@ import os
 import queue
 import threading
 import time
-import uuid
 from pathlib import Path
 from typing import Any
 
@@ -41,9 +40,11 @@ from .drivers import ARCHETYPES, archetype_catalogue, build_roster
 from .experiments import (EXPERIMENTS, INTERVENTION_PRESETS, run_experiment,
                           run_intervention)
 from .explain import explain_hotspot, explain_run
+from .jobs import JOB_LOCK, JOBS, Job, fail_job, finish_job, new_job, progress_for
 from .live import run_for_streaming
 from .models import Weather
 from .nlquery import SUGGESTIONS, ask
+from .passport_api import router as passport_router
 from .report import generate_report
 from .scenario import ScenarioSpace, sample, scenario_from_dict
 from .storage import DEFAULT_DB, Store
@@ -69,6 +70,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Apex Passport: all car/passport/stress-test/insurance routes live in their
+# own module and are mounted here, so the existing routes above are never
+# touched by that feature's development.
+app.include_router(passport_router)
+
 DISCLAIMER = (
     "Simulated results under stated model assumptions. Not a real-world crash "
     "probability or safety assessment."
@@ -76,80 +82,12 @@ DISCLAIMER = (
 
 
 # ==========================================================================
-# Job registry for long-running work
+# Job registry for long-running work -- see jobs.py (also used by passport_api)
 # ==========================================================================
-class Job:
-    def __init__(self, job_id: str, kind: str, label: str, total: int):
-        self.id = job_id
-        self.kind = kind
-        self.label = label
-        self.total = total
-        self.completed = 0
-        self.status = "running"
-        self.phase = "simulating"
-        self.started = time.time()
-        self.error: str | None = None
-        self.result: dict | None = None
-        self.batch_id: str | None = None
-        self.events: queue.Queue = queue.Queue(maxsize=4096)
-        self.latest: dict = {}
-
-    def push(self, payload: dict) -> None:
-        self.latest = payload
-        try:
-            self.events.put_nowait(payload)
-        except queue.Full:
-            pass
-
-    def snapshot(self) -> dict:
-        return dict(
-            job_id=self.id, kind=self.kind, label=self.label, status=self.status,
-            phase=self.phase, completed=self.completed, total=self.total,
-            elapsed_s=round(time.time() - self.started, 2),
-            batch_id=self.batch_id, error=self.error,
-            runs_per_second=round(
-                self.completed / max(time.time() - self.started, 1e-6), 2),
-            latest=self.latest,
-        )
-
-
-JOBS: dict[str, Job] = {}
-JOB_LOCK = threading.Lock()
-
-
-def _new_job(kind: str, label: str, total: int) -> Job:
-    job = Job(uuid.uuid4().hex[:12], kind, label, total)
-    with JOB_LOCK:
-        JOBS[job.id] = job
-    return job
-
-
-def _progress_for(job: Job):
-    def cb(p: dict):
-        job.completed = p.get("completed", job.completed)
-        if p.get("phase"):
-            job.phase = p["phase"]
-        if p.get("batch_id"):
-            job.batch_id = p["batch_id"]
-        job.push(p)
-    return cb
-
-
-def _finish(job: Job, result: dict | None, batch_id: str | None = None):
-    job.status = "complete"
-    job.phase = "complete"
-    job.result = result
-    if batch_id:
-        job.batch_id = batch_id
-    job.push(dict(phase="complete", batch_id=job.batch_id,
-                  completed=job.completed, total=job.total))
-
-
-def _fail(job: Job, exc: Exception):
-    job.status = "error"
-    job.phase = "error"
-    job.error = f"{type(exc).__name__}: {exc}"
-    job.push(dict(phase="error", error=job.error))
+_new_job = new_job
+_progress_for = progress_for
+_finish = finish_job
+_fail = fail_job
 
 
 # ==========================================================================
