@@ -13,9 +13,11 @@ run for every existing analysis/replay tool.
 """
 from __future__ import annotations
 
+import json
 import multiprocessing as mp
 import statistics
 import uuid
+from datetime import datetime, timezone
 from typing import Callable
 
 from . import assumptions as A
@@ -89,12 +91,29 @@ def run_stress_test(
     store.finish_batch(batch_id, dict(n_runs=completed, runs_with_replay=n_replays), 0.0)
 
     result = _summarise(store, car, batch_id, track_id, weather, n_races, run_rows, telemetries)
+
+    store.exec(
+        "INSERT INTO stress_tests (id, car_id, created_at, track_id, weather, "
+        "n_races, batch_id, status, results_json) VALUES (?,?,?,?,?,?,?,?,?)",
+        (uuid.uuid4().hex[:12], car_id, datetime.now(timezone.utc).isoformat(timespec="seconds"),
+         track_id, weather, n_races, batch_id, "complete", json.dumps(result)),
+    )
+
     record_event(store, car_id, HistoryEventType.STRESS_TEST, dict(
         batch_id=batch_id, track_id=track_id, weather=weather, n_races=n_races,
         parts_crossing_red=result["parts_crossing_red_count"],
         total_cost_forecast=result["cost_forecast"]["total"],
     ))
     return result
+
+
+def latest_stress_test(store, car_id: str) -> dict | None:
+    row = store.q1(
+        "SELECT * FROM stress_tests WHERE car_id=? AND status='complete' "
+        "ORDER BY created_at DESC LIMIT 1", (car_id,))
+    if not row:
+        return None
+    return json.loads(row["results_json"])
 
 
 def _summarise(store, car: dict, batch_id: str, track_id: str, weather: str,

@@ -643,6 +643,23 @@ CONTACT_REPAIR_COST_SEVERE = declare(
     group="Apex Passport", label="Illustrative repair cost, severe contact/collision",
     range=(0, 100_000),
 )
+POLICY_INSPECTION_INTERVAL_RACES = declare(
+    "policy_inspection_interval_races", 5, unit="races", kind="assumption",
+    group="Apex Passport", label="Required inspection interval",
+    note="Illustrative policy condition: an inspection history event is "
+         "expected at least this often, counted in 'race' history events "
+         "since the last 'inspection' event. Not a real insurer's policy "
+         "wording.",
+    range=(1, 20),
+)
+POLICY_INSPECTION_WARNING_MARGIN = declare(
+    "policy_inspection_warning_margin", 2, unit="races", kind="assumption",
+    group="Apex Passport", label="Inspection-due warning margin",
+    note="A condition shows 'at risk' this many races before it would be "
+         "'breached', so the passport can warn ahead of a lapse rather than "
+         "only reporting one after it happens.",
+    range=(0, 10),
+)
 STRESS_TEST_DEFAULT_N_RACES = declare(
     "stress_test_default_n_races", 200, unit="races", kind="assumption",
     group="Apex Passport", label="Default stress-test race count",
