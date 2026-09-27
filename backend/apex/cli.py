@@ -17,6 +17,7 @@ from .batch import default_workers, run_monte_carlo
 from .circuits import list_tracks
 from .discovery import compare_search_strategies, discover_patterns, guided_search
 from .experiments import EXPERIMENTS, run_experiment, run_intervention
+from .passport_demo import seed_passport_demo
 from .report import generate_report
 from .scenario import ScenarioSpace
 from .storage import DEFAULT_DB, Store
@@ -185,6 +186,24 @@ def cmd_demo(args):
     print(f"  guided batch:      {gd}")
 
 
+def cmd_passport_demo(args):
+    """Seed the Apex Passport screens with two demo cars and their history."""
+    store = Store(args.db)
+    print("=" * 66)
+    print("Apex Passport demo seed")
+    print("=" * 66)
+    t0 = time.time()
+    out = seed_passport_demo(store, n_races=args.races, force=args.force,
+                             progress=_progress)
+    print()
+    if out["created"]:
+        print(f"Done in {time.time() - t0:.1f}s")
+        print(f"  demo car:          {out['car_id']}")
+        print(f"  student car:       {out['student_car_id']}")
+        print(f"  stress-test batch: {out['stress_test_batch_id']}")
+        print("Open http://localhost:3000/passport")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(
         prog="apex", description="Multi-agent motorsport safety stress tester")
@@ -236,6 +255,15 @@ def main(argv=None):
     p.add_argument("--population", type=int, default=60)
     p.add_argument("--replays", type=int, default=400)
     p.set_defaults(func=cmd_demo)
+
+    p = sub.add_parser("passport", help="Apex Passport commands")
+    psub = p.add_subparsers(dest="passport_cmd", required=True)
+    pd = psub.add_parser("demo", help="seed demo cars for the Passport screens")
+    pd.add_argument("--races", type=int, default=100,
+                    help="simulated races in the demo stress test")
+    pd.add_argument("--force", action="store_true",
+                    help="add another set of demo cars even if one exists")
+    pd.set_defaults(func=cmd_passport_demo)
 
     args = ap.parse_args(argv)
     args.func(args)

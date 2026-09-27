@@ -101,8 +101,14 @@ The dashboard is empty until a batch exists — by design. Nothing in the UI is
 mocked, so there is nothing to show before the engine has produced trajectories.
 
 The Apex Passport screens (under **Apex Passport** in the side menu, starting at
-<http://localhost:3000/passport>) do not need a seeded batch — set up a car in
-the Garage and run a stress test from there. See [Apex Passport](#apex-passport).
+<http://localhost:3000/passport>) do not need a seeded batch. To fill them with a
+demo car and its history (about 20 s), run from `backend/`:
+
+```bash
+../.venv/bin/python -m apex.cli passport demo
+```
+
+See [Apex Passport](#apex-passport).
 
 ### CLI
 
@@ -117,6 +123,7 @@ $P guided --generations 8      # adversarial search, seeded from the last batch
 $P experiment all --runs 150   # the controlled experiment suite
 $P whatif --changes '{"following_gap_delta":0.15}' -n 200
 $P report --out report.md      # the stress-test write-up
+$P passport demo               # demo cars for the Apex Passport screens
 ```
 
 ---
@@ -288,7 +295,8 @@ backend/apex/
   stress_test.py   N seeded races with the team car, aggregated per part
   insurance.py     policy conditions, insurer summary, incidents, claim/evidence packs
   passport_api.py  the passport HTTP routes (mounted by api.py)
-backend/tests/     152 tests across 11 files
+  passport_demo.py demo cars and history for `apex.cli passport demo`
+backend/tests/     160 tests across 12 files
 frontend/src/
   app/             11 simulator screens; app/passport/ holds the 5 Passport screens
   components/      UI primitives, charts, circuit map, replay viewer, passport widgets
@@ -333,6 +341,25 @@ read.
 > Everything it produces is supporting evidence from simulated and recorded
 > history. It is **not** an insurance quote, a claim decision, or a real-world
 > crash probability — and every screen and payload says so.
+
+### Try it
+
+```bash
+cd backend && ../.venv/bin/python -m apex.cli passport demo
+```
+
+This creates two cars. **Car #7 (demo)**, an F4 car with a late-braking driver,
+has an intake inspection, four races, a part replacement, an incident with a
+claim pack, and a 100-race stress test — enough that every screen has something
+in it, including red and amber parts and two policy conditions at risk. A
+**Student car (demo)** is left fresh for contrast. The command does nothing if
+the demo car already exists (`--force` adds another; `--races N` sizes the
+stress test).
+
+The demo car's races are real simulated races with that car as the team car,
+and their wear comes from the same model a stress test uses; each race event is
+marked `simulated for demo`. Only the starting condition at the intake
+inspection is hand-chosen.
 
 ### The five screens
 
@@ -405,8 +432,8 @@ All under `/api`, mounted from `passport_api.py`:
   *any* two cars came within 0.8 s TTC, not only pairs involving the team car;
   the replay shows who was involved.
 - **Races and inspections have no screen yet.** The history model supports
-  them, and the inspection-interval condition counts them, but they can only be
-  recorded from code (`passport.record_event`) for now.
+  them and the inspection-interval condition counts them, but outside the demo
+  seed they can only be recorded from code (`passport.record_event`).
 - **Policy conditions are illustrative**, not the wording of any real policy.
 
 ---
@@ -491,7 +518,7 @@ used here.
 cd backend && ../.venv/bin/python -m pytest tests/ -q
 ```
 
-152 tests across eleven files. The simulator:
+160 tests across twelve files. The simulator:
 
 - `test_safety_metrics.py` — TTC against closed-form hand calculations in every
   regime (rear-end, lateral-only, already-overlapping, diverging, lap wraparound),
@@ -524,5 +551,8 @@ The Apex Passport:
   replays that exist.
 - `test_insurance.py` — policy-condition states, the insurer summary, the
   incident snapshot staying frozen, claim packs and evidence packs.
+- `test_passport_demo.py` — the demo seed creates both cars, keeps its history
+  chained and in time order, labels its races as simulated, shows every part and
+  policy state, produces a claim pack with new damage, and is safe to re-run.
 - `test_passport_api.py` — every passport route, including the stress-test job
   lifecycle and error cases, alongside the existing API.

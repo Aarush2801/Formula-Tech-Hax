@@ -153,7 +153,7 @@ def set_part_life(store, car_id: str, part_name: str, life_used_pct: float) -> N
     )
 
 
-def replace_part(store, car_id: str, part_name: str) -> dict:
+def replace_part(store, car_id: str, part_name: str, time: str | None = None) -> dict:
     """Resets a part to 0% life used and logs a tamper-evident history event."""
     before = store.q1("SELECT * FROM parts WHERE car_id=? AND name=?",
                       (car_id, part_name))
@@ -162,7 +162,7 @@ def replace_part(store, car_id: str, part_name: str) -> dict:
     set_part_life(store, car_id, part_name, 0.0)
     event = record_event(store, car_id, HistoryEventType.PART_REPLACED, dict(
         part=part_name, life_used_pct_before=before["life_used_pct"],
-    ))
+    ), time=time)
     return event
 
 

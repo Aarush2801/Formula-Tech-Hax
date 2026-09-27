@@ -167,6 +167,26 @@ function EventDetails({ event }: { event: HistoryEvent }) {
     case "incident":
       text = String(d.description ?? "");
       break;
+    case "race": {
+      const added = Object.values((d.life_used_added as Record<string, number>) ?? {}).reduce(
+        (a, b) => a + b,
+        0
+      );
+      const strikes = Number(d.kerb_strikes ?? 0);
+      const contacts = Number(d.contacts ?? 0);
+      text =
+        `Race ${d.race ?? ""} · ${String(d.weather ?? "").toLowerCase()} · ` +
+        `${strikes} kerb strike${strikes === 1 ? "" : "s"} · ` +
+        `${contacts} contact${contacts === 1 ? "" : "s"} · +${added.toFixed(1)}% total wear` +
+        (d.incident_id ? " · incident" : "") +
+        (d.source ? ` (${d.source})` : "");
+      break;
+    }
+    case "inspection":
+      text =
+        (d.kind ? `${String(d.kind).replace(/^\w/, (c) => c.toUpperCase())} inspection` : "Inspection") +
+        (d.note ? ` — ${d.note}` : "");
+      break;
     case "driver_updated": {
       const after = d.after as { archetype?: string; overrides?: Record<string, number> } | undefined;
       const n = Object.keys(after?.overrides ?? {}).length;
