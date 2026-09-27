@@ -49,8 +49,8 @@ What this prototype adds is the layer *above* such a simulator:
               └──────────┬──────────┘
                          ▼
               ┌─────────────────────┐
-              │ SAFETY DASHBOARD    │  11 screens, replay, what-if, report
-              └─────────────────────┘
+              │ SAFETY DASHBOARD    │  11 screens, replay, what-if, report,
+              └─────────────────────┘  plus 5 Apex Passport screens
 ```
 
 It turns *"where is the dangerous corner?"* into *"which combinations of
@@ -99,6 +99,10 @@ npm run dev          # http://localhost:3000
 
 The dashboard is empty until a batch exists — by design. Nothing in the UI is
 mocked, so there is nothing to show before the engine has produced trajectories.
+
+The Apex Passport screens (under **Apex Passport** in the side menu, starting at
+<http://localhost:3000/passport>) do not need a seeded batch — set up a car in
+the Garage and run a stress test from there. See [Apex Passport](#apex-passport).
 
 ### CLI
 
@@ -241,7 +245,7 @@ Measured on an Apple M4 (6 performance + 4 efficiency cores), 10 worker processe
 | Single 22-car, 75 s run | ~0.6 s |
 | Throughput | ~8–11 runs/s |
 | **10,000-run batch** | **~20 min**, including a 500-run replay pass |
-| Database | ~55 MB for 10,000 runs |
+| Database | ~115 MB for the full demo seed (10,000 Monte Carlo + 640 guided runs) |
 
 Full trajectories are retained only in a window around interesting conflicts.
 Keeping everything would be gigabytes per batch, nearly all of it cars driving
@@ -257,7 +261,7 @@ backend/apex/
   models.py        the data contract between layers
   track.py         segment specs → closed centreline; curvilinear lookups; zones
   circuits.py      authored circuits (fictional, deliberately)
-  drivers.py       persistent profiles and per-run perturbation
+  drivers.py       persistent profiles, per-run perturbation, team-driver overrides
   environment.py   weather → grip / visibility / spray
   errors.py        human-error events with persistence
   engine.py        the timestep simulation — deterministic, vectorised, no LLM
@@ -274,12 +278,21 @@ backend/apex/
   live.py          single-run playback for the live view
   storage.py       SQLite
   api.py           HTTP surface (REST + SSE)
+  jobs.py          shared background-job registry (batches, searches, stress tests)
   cli.py           command line
-backend/tests/     75 tests: metrics, determinism, engine, full pipeline
+
+  # Apex Passport
+  car_profiles.py  car specification + illustrative class presets
+  passport.py      cars, parts, team driver, hash-chained history
+  wear.py          kerb strikes / contacts → predicted % life used per part
+  stress_test.py   N seeded races with the team car, aggregated per part
+  insurance.py     policy conditions, insurer summary, incidents, claim/evidence packs
+  passport_api.py  the passport HTTP routes (mounted by api.py)
+backend/tests/     152 tests across 11 files
 frontend/src/
-  app/             11 screens
-  components/      UI primitives, charts, circuit map, replay viewer
-  lib/             typed API client, theme vocabulary, formatting, state
+  app/             11 simulator screens; app/passport/ holds the 5 Passport screens
+  components/      UI primitives, charts, circuit map, replay viewer, passport widgets
+  lib/             typed API clients, theme vocabulary, formatting, state
 ```
 
 The layering is deliberate: **the physics can be replaced without touching
@@ -306,6 +319,95 @@ Above the simulation:
 Both were built this way on purpose. An explanation of a safety-critical
 interaction is exactly the place where a fluent guess is most damaging, and the
 deterministic version is auditable line by line.
+
+---
+
+## Apex Passport
+
+A digital passport for **one team's race car**, built on top of the simulator
+without changing how any existing run behaves. It keeps the car's spec, part
+condition, team driver and history in one place, uses the simulator to
+stress-test that car before its next race, and assembles evidence an insurer can
+read.
+
+> Everything it produces is supporting evidence from simulated and recorded
+> history. It is **not** an insurance quote, a claim decision, or a real-world
+> crash probability — and every screen and payload says so.
+
+### The five screens
+
+| Screen | What it does |
+|---|---|
+| **Garage** | Create a car from a class preset (F1 2026, F2, F3, F4, Formula E, Formula Student) and adjust its spec. Choose its team driver: an archetype, with any of 11 traits adjusted by slider. |
+| **Passport** | Life used per part against the 70% (inspect) and 90% (replace) thresholds, recording a part replacement, policy conditions, chain verification and the full history. |
+| **Stress test** | Race the car N times (default 200) at a chosen circuit and weather, each against a different seeded field. |
+| **Readiness** | The latest stress test: predicted life used per part (lowest / median / highest across the races), replace-or-inspect recommendations, an illustrative cost forecast, and the closest calls, each linked to its replay. |
+| **Insurance** | Insurer summary, policy conditions, incident logging, per-incident claim packs, and the evidence pack (printable HTML or JSON). |
+
+### How it works
+
+**The team car.** A stress-test scenario puts the car in grid slot 1 with its
+own physics (mass, power, grip, downforce, drag, braking) and its own driver;
+the other 21 cars are the normal field. A scenario without a team car takes
+exactly the code path it always did. Tests assert that a team car built from
+the default assumptions gets exactly the default braking and cornering limits,
+and that the other cars' physics are untouched. Stress-test
+runs are ordinary runs, so they also show up in Replay and every analysis screen.
+
+**The team driver.** Each car stores its driver as an archetype plus optional
+per-trait overrides, clamped to bounds that span the archetype catalogue. Saving
+a driver change is logged to the history, so the driver behind any stress test
+can be audited later.
+
+**Wear.** Each simulated race's kerb strikes and contacts become a predicted
+increment of % life used. Harder hits cost disproportionately more (kerb wear
+grows with severity squared; contact wear grows with impact speed and triples
+for a severe contact), and load goes to the side of the car that was struck.
+Parts tracked: four suspension corners, wheels, brakes, harness and seat.
+
+**Tamper-evident history.** Every history event stores a SHA-256 hash of its own
+content plus the previous event's hash. Verification recomputes the chain from
+what is stored; editing an old event, even with a forged hash for that one row,
+breaks the chain at that point.
+
+**Incidents and claim packs.** Logging an incident freezes the car's part
+condition at that moment. The claim pack compares that frozen "before" with the
+current condition, so pre-existing wear and new damage can't be confused.
+
+### API
+
+All under `/api`, mounted from `passport_api.py`:
+
+| Route | |
+|---|---|
+| `GET /car-presets` | class presets and the driver-trait catalogue |
+| `GET /cars` · `POST /cars` | list / create cars (optionally with a spec and team driver) |
+| `PUT /cars/{id}/driver` | save the team driver (logged to history) |
+| `GET /cars/{id}/passport` | car, parts, history, chain verification, policy conditions |
+| `POST /cars/{id}/parts/{part}/replace` | record a part replacement |
+| `GET /cars/{id}/verify` | verify the history chain |
+| `POST /cars/{id}/stress-test` · `GET /stress-test/{job_id}` | start / poll a stress test |
+| `GET /cars/{id}/stress-tests/latest` | the latest stress-test result |
+| `POST /cars/{id}/incidents` · `GET /cars/{id}/incidents` | log / list incidents |
+| `GET /cars/{id}/claim-pack/{incident_id}` | before/after claim pack |
+| `GET /cars/{id}/insurer-summary` | plain-English insurer summary |
+| `GET /cars/{id}/evidence-pack?format=html` | evidence pack (`json` by default) |
+
+### Passport limitations
+
+- **Car physics are illustrative.** Class presets have plausible orderings, not
+  manufacturer figures.
+- **Kerb strikes are a proxy.** The circuits have no kerb geometry, so a strike
+  is inferred from running past 85% of the half-width while still on track.
+- **Wear rates are dials.** Every wear, cost and threshold figure is a labelled
+  assumption in `assumptions.py` (group "Apex Passport"), not a measured curve.
+- **Close calls are field-wide.** A stress test's close calls are races in which
+  *any* two cars came within 0.8 s TTC, not only pairs involving the team car;
+  the replay shows who was involved.
+- **Races and inspections have no screen yet.** The history model supports
+  them, and the inspection-interval condition counts them, but they can only be
+  recorded from code (`passport.record_event`) for now.
+- **Policy conditions are illustrative**, not the wording of any real policy.
 
 ---
 
@@ -389,7 +491,7 @@ used here.
 cd backend && ../.venv/bin/python -m pytest tests/ -q
 ```
 
-75 tests across four files:
+152 tests across eleven files. The simulator:
 
 - `test_safety_metrics.py` — TTC against closed-form hand calculations in every
   regime (rear-end, lateral-only, already-overlapping, diverging, lap wraparound),
@@ -404,3 +506,23 @@ cd backend && ../.venv/bin/python -m pytest tests/ -q
   matching the rows beneath it, replay reproduction, pattern-record consistency,
   analysis payloads summing correctly, every suggested query answering, report
   completeness, paired-seed interventions.
+
+The Apex Passport:
+
+- `test_car_profiles.py` — no team car means no change; a reference-spec team
+  car gets exactly the default physics limits; other cars are untouched; a
+  lighter, grippier car corners faster; presets are well-formed.
+- `test_team_driver.py` — trait overrides are applied, clamped and persisted;
+  driver changes are chained into history; old databases migrate in place; stress
+  tests use the saved driver.
+- `test_passport.py` — part initialisation and thresholds, replacement logging,
+  hash chaining, and tamper detection (edited details, and a forged hash).
+- `test_wear.py` — severity scaling, side attribution, and that a contact can
+  never restore life.
+- `test_stress_test.py` — full report shape, determinism for a fixed seed,
+  worn parts raising predictions, history logging, close calls matching the
+  replays that exist.
+- `test_insurance.py` — policy-condition states, the insurer summary, the
+  incident snapshot staying frozen, claim packs and evidence packs.
+- `test_passport_api.py` — every passport route, including the stress-test job
+  lifecycle and error cases, alongside the existing API.
