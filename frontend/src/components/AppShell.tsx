@@ -4,6 +4,8 @@ import {
   Activity,
   AlertTriangle,
   BarChart3,
+  Car,
+  ClipboardCheck,
   CircleDot,
   FileText,
   FlaskConical,
@@ -14,7 +16,10 @@ import {
   PlayCircle,
   Search,
   Settings2,
+  ShieldCheck,
+  Stamp,
   Users,
+  Zap,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -36,6 +41,14 @@ const NAV = [
   { href: "/history", label: "History", icon: History },
   { href: "/report", label: "Report", icon: FileText },
   { href: "/assumptions", label: "Model assumptions", icon: Settings2 },
+];
+
+const PASSPORT_NAV = [
+  { href: "/passport", label: "Garage", icon: Car },
+  { href: "/passport/car", label: "Passport", icon: Stamp },
+  { href: "/passport/stress-test", label: "Stress test", icon: Zap },
+  { href: "/passport/readiness", label: "Readiness", icon: ClipboardCheck },
+  { href: "/passport/insurance", label: "Insurance", icon: ShieldCheck },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -66,34 +79,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </span>
         </Link>
 
-        <ul className="flex-1 overflow-y-auto px-2 pb-3">
-          {NAV.map((n) => {
-            const active = path === n.href;
-            const Icon = n.icon;
-            return (
-              <li key={n.href}>
-                <Link
-                  href={n.href}
-                  aria-current={active ? "page" : undefined}
-                  className={`group relative mb-[1px] flex items-center gap-2.5 rounded px-2.5 py-[7px] text-[12px] transition-colors ${
-                    active
-                      ? "bg-surface-3 text-ink"
-                      : "text-ink-3 hover:bg-surface-2 hover:text-ink-2"
-                  }`}
-                >
-                  {active && (
-                    <span
-                      className="absolute inset-y-[6px] left-0 w-[2px] rounded-full"
-                      style={{ background: "var(--accent)" }}
-                    />
-                  )}
-                  <Icon size={14} className="shrink-0" aria-hidden />
-                  <span className="truncate">{n.label}</span>
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
+        <div className="flex-1 overflow-y-auto px-2 pb-3">
+          <NavList items={NAV} path={path} />
+          <p className="label-xs mb-1 mt-4 px-2.5 !text-[9px]">Apex Passport</p>
+          <NavList items={PASSPORT_NAV} path={path} />
+        </div>
 
         <div className="border-t border-line px-3 py-2.5">
           <div className="flex items-center gap-1.5">
@@ -193,6 +183,45 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </footer>
       </div>
     </div>
+  );
+}
+
+function NavList({
+  items,
+  path,
+}: {
+  items: { href: string; label: string; icon: React.ElementType }[];
+  path: string;
+}) {
+  return (
+    <ul>
+      {items.map((n) => {
+        const active = path === n.href;
+        const Icon = n.icon;
+        return (
+          <li key={n.href}>
+            <Link
+              href={n.href}
+              aria-current={active ? "page" : undefined}
+              className={`group relative mb-[1px] flex items-center gap-2.5 rounded px-2.5 py-[7px] text-[12px] transition-colors ${
+                active
+                  ? "bg-surface-3 text-ink"
+                  : "text-ink-3 hover:bg-surface-2 hover:text-ink-2"
+              }`}
+            >
+              {active && (
+                <span
+                  className="absolute inset-y-[6px] left-0 w-[2px] rounded-full"
+                  style={{ background: "var(--accent)" }}
+                />
+              )}
+              <Icon size={14} className="shrink-0" aria-hidden />
+              <span className="truncate">{n.label}</span>
+            </Link>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 

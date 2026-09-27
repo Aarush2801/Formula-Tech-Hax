@@ -37,7 +37,10 @@ def wear_from_kerb_strike(strike: dict) -> dict[str, float]:
 
 
 def wear_from_contact(contact: dict) -> dict[str, float]:
-    speed = float(contact.get("impact_speed", 0.0))
+    # impact_speed is the signed closing speed at the moment of overlap; two
+    # cars already separating while still touching have a negative value.
+    # That contact costs the base wear only -- it must never *restore* life.
+    speed = max(0.0, float(contact.get("impact_speed", 0.0)))
     total = A.CONTACT_WEAR_BASE_PCT + A.CONTACT_WEAR_SPEED_GAIN * speed
     if contact.get("severe"):
         total *= A.CONTACT_WEAR_SEVERE_MULTIPLIER

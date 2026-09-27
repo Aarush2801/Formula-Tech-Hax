@@ -22,8 +22,12 @@ from enum import Enum
 
 from . import assumptions as A
 from .car_profiles import CarProfile, car_profile_from_dict
+from .drivers import ARCHETYPES, clamp_driver_overrides
 
 GENESIS_HASH = "0" * 64  # the fixed prev_hash for a car's first history event
+
+# The team driver a car gets until the team sets its own.
+DEFAULT_DRIVER_ARCHETYPE = "HIGH_CONSISTENCY"
 
 
 class HistoryEventType(str, Enum):
@@ -34,6 +38,7 @@ class HistoryEventType(str, Enum):
     INSPECTION = "inspection"
     INCIDENT = "incident"
     STRESS_TEST = "stress_test"
+    DRIVER_UPDATED = "driver_updated"
 
 
 def _now() -> str:
@@ -54,30 +59,58 @@ def compute_event_hash(car_id: str, time: str, event_type: str, details: dict,
 # --------------------------------------------------------------------------
 # Cars
 # --------------------------------------------------------------------------
-def create_car(store, name: str, car_class: str, car_profile: CarProfile) -> str:
+def normalise_team_driver(team_driver: dict | None) -> dict:
+    """A team driver is an archetype plus optional per-trait overrides.
+    Unknown archetypes fall back to the default; overrides are clamped."""
+    team_driver = team_driver or {}
+    archetype = team_driver.get("archetype") or DEFAULT_DRIVER_ARCHETYPE
+    if archetype not in ARCHETYPES:
+        raise ValueError(f"unknown driver archetype '{archetype}'")
+    return dict(archetype=archetype,
+                overrides=clamp_driver_overrides(team_driver.get("overrides")))
+
+
+def create_car(store, name: str, car_class: str, car_profile: CarProfile,
+               team_driver: dict | None = None) -> str:
     car_id = uuid.uuid4().hex[:12]
     store.exec(
-        "INSERT INTO cars (id, name, class, car_profile_json, created_at) "
-        "VALUES (?,?,?,?,?)",
-        (car_id, name, car_class, _canonical(car_profile.to_dict()), _now()),
+        "INSERT INTO cars (id, name, class, car_profile_json, created_at, "
+        "team_driver_json) VALUES (?,?,?,?,?,?)",
+        (car_id, name, car_class, _canonical(car_profile.to_dict()), _now(),
+         _canonical(normalise_team_driver(team_driver))),
     )
     _init_parts(store, car_id)
     return car_id
 
 
-def get_car(store, car_id: str) -> dict | None:
-    row = store.q1("SELECT * FROM cars WHERE id=?", (car_id,))
-    if not row:
-        return None
+def _decode_car(row: dict) -> dict:
     row["car_profile"] = json.loads(row.pop("car_profile_json"))
+    raw = row.pop("team_driver_json", None)
+    row["team_driver"] = normalise_team_driver(json.loads(raw) if raw else None)
     return row
 
 
+def get_car(store, car_id: str) -> dict | None:
+    row = store.q1("SELECT * FROM cars WHERE id=?", (car_id,))
+    return _decode_car(row) if row else None
+
+
 def list_cars(store) -> list[dict]:
-    rows = store.q("SELECT * FROM cars ORDER BY created_at DESC")
-    for r in rows:
-        r["car_profile"] = json.loads(r.pop("car_profile_json"))
-    return rows
+    return [_decode_car(r) for r in store.q("SELECT * FROM cars ORDER BY created_at DESC")]
+
+
+def set_team_driver(store, car_id: str, team_driver: dict) -> dict:
+    """Saves the car's team driver and logs the change to the history chain,
+    so a stress test's driver assumptions are auditable after the fact."""
+    car = get_car(store, car_id)
+    if not car:
+        raise KeyError(f"unknown car '{car_id}'")
+    new = normalise_team_driver(team_driver)
+    store.exec("UPDATE cars SET team_driver_json=? WHERE id=?",
+               (_canonical(new), car_id))
+    record_event(store, car_id, HistoryEventType.DRIVER_UPDATED,
+                 dict(before=car["team_driver"], after=new))
+    return get_car(store, car_id)
 
 
 def car_profile_of(store, car_id: str) -> CarProfile | None:

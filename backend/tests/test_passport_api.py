@@ -156,3 +156,32 @@ def test_stress_test_unknown_car_404s(client):
 def test_unknown_job_id_404s(client):
     r = client.get("/api/stress-test/not-a-real-job")
     assert r.status_code == 404
+
+
+def test_car_presets_include_driver_traits(client):
+    traits = client.get("/api/car-presets").json()["driver_traits"]
+    assert {"aggression", "reaction_time"} <= {t["key"] for t in traits}
+
+
+def test_create_car_with_team_driver_and_update_it(client):
+    car = client.post("/api/cars", json=dict(
+        name="Driver Car", car_class="F4",
+        team_driver=dict(archetype="SMOOTH", overrides=dict(aggression=0.7)))).json()
+    assert car["team_driver"] == dict(archetype="SMOOTH", overrides=dict(aggression=0.7))
+
+    r = client.put(f"/api/cars/{car['id']}/driver",
+                   json=dict(archetype="LATE_BRAKER", overrides={}))
+    assert r.status_code == 200
+    assert r.json()["team_driver"]["archetype"] == "LATE_BRAKER"
+
+    assert client.put(f"/api/cars/{car['id']}/driver",
+                      json=dict(archetype="NOPE")).status_code == 400
+    assert client.put("/api/cars/missing/driver",
+                      json=dict(archetype="SMOOTH")).status_code == 404
+
+
+def test_latest_stress_test_route_empty_then_404(client):
+    car = client.post("/api/cars", json=dict(name="Fresh", car_class="F4")).json()
+    r = client.get(f"/api/cars/{car['id']}/stress-tests/latest")
+    assert r.status_code == 200 and r.json()["result"] is None
+    assert client.get("/api/cars/missing/stress-tests/latest").status_code == 404
