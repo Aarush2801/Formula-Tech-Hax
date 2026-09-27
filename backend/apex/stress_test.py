@@ -26,8 +26,6 @@ from .passport import HistoryEventType, get_car, get_parts, part_status_for, rec
 from .scenario import ScenarioSpace, sample
 from .wear import estimated_repair_cost, wear_for_race
 
-DEFAULT_DRIVER_ARCHETYPE = "HIGH_CONSISTENCY"
-
 
 def _worker_stress_run(args):
     scenario, batch_id = args
@@ -37,8 +35,9 @@ def _worker_stress_run(args):
 
 
 def _build_scenarios(car: dict, track_id: str, weather: str, n_races: int,
-                     base_seed: int, driver_archetype: str, n_cars: int):
-    team_car = dict(car_profile=car["car_profile"], driver_archetype=driver_archetype)
+                     base_seed: int, driver: dict, n_cars: int):
+    team_car = dict(car_profile=car["car_profile"], driver_archetype=driver["archetype"],
+                    driver_overrides=driver["overrides"] or None)
     scenarios = []
     for i in range(n_races):
         sc = sample(base_seed + i, ScenarioSpace(),
@@ -52,7 +51,7 @@ def _build_scenarios(car: dict, track_id: str, weather: str, n_races: int,
 def run_stress_test(
     store, car_id: str, track_id: str = "vale_park", weather: str = "DRY",
     n_races: int | None = None, base_seed: int = 600_000,
-    driver_archetype: str = DEFAULT_DRIVER_ARCHETYPE, n_cars: int = 22,
+    driver_archetype: str | None = None, n_cars: int = 22,
     workers: int | None = None, progress: Callable[[dict], None] | None = None,
 ) -> dict:
     car = get_car(store, car_id)
@@ -61,9 +60,13 @@ def run_stress_test(
     n_races = n_races or A.STRESS_TEST_DEFAULT_N_RACES
     workers = workers or default_workers()
     batch_id = uuid.uuid4().hex[:12]
+    # The car's saved team driver, unless the caller names an archetype for
+    # this one test -- then that plain archetype is used, with no overrides.
+    driver = (dict(archetype=driver_archetype, overrides={}) if driver_archetype
+              else car["team_driver"])
 
     scenarios = _build_scenarios(car, track_id, weather, n_races, base_seed,
-                                 driver_archetype, n_cars)
+                                 driver, n_cars)
     store.create_batch(batch_id, f"Stress test: {car['name']}", "stress_test",
                       n_races, None, None, dict(car_id=car_id, workers=workers),
                       base_seed)
@@ -88,9 +91,16 @@ def run_stress_test(
     store.insert_events(event_rows)
     store.update_batch_progress(batch_id, completed)
     n_replays = generate_replays(store, batch_id, budget=min(60, n_races), workers=workers)
+    # run_rows were built before the replay pass, so their has_replay flags
+    # are stale; refresh them so close calls link to the replays that exist.
+    replayed = {r["id"] for r in store.q(
+        "SELECT id FROM runs WHERE batch_id=? AND has_replay=1", (batch_id,))}
+    for row in run_rows:
+        row["has_replay"] = row["id"] in replayed
     store.finish_batch(batch_id, dict(n_runs=completed, runs_with_replay=n_replays), 0.0)
 
     result = _summarise(store, car, batch_id, track_id, weather, n_races, run_rows, telemetries)
+    result["driver"] = driver
 
     store.exec(
         "INSERT INTO stress_tests (id, car_id, created_at, track_id, weather, "
@@ -101,7 +111,7 @@ def run_stress_test(
 
     record_event(store, car_id, HistoryEventType.STRESS_TEST, dict(
         batch_id=batch_id, track_id=track_id, weather=weather, n_races=n_races,
-        parts_crossing_red=result["parts_crossing_red_count"],
+        driver=driver, parts_crossing_red=result["parts_crossing_red_count"],
         total_cost_forecast=result["cost_forecast"]["total"],
     ))
     return result
@@ -113,7 +123,7 @@ def latest_stress_test(store, car_id: str) -> dict | None:
         "ORDER BY created_at DESC LIMIT 1", (car_id,))
     if not row:
         return None
-    return json.loads(row["results_json"])
+    return {**json.loads(row["results_json"]), "created_at": row["created_at"]}
 
 
 def _summarise(store, car: dict, batch_id: str, track_id: str, weather: str,

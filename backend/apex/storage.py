@@ -186,7 +186,8 @@ CREATE TABLE IF NOT EXISTS cars (
     name TEXT NOT NULL,
     class TEXT NOT NULL,
     car_profile_json TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    team_driver_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS parts (
@@ -268,6 +269,7 @@ class Store:
         additions = {
             "patterns": [("band_runs", "INTEGER"), ("occurrence_rate", "REAL")],
             "runs": [("scenario_json", "TEXT")],
+            "cars": [("team_driver_json", "TEXT")],
         }
         conn = self.connect()
         for table, cols in additions.items():

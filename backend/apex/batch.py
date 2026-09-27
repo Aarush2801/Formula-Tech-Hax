@@ -55,7 +55,8 @@ def build_run(scenario: Scenario) -> tuple[Any, list]:
     # stress test, so this branch does not run in the base simulator's path.
     team_car_profile = None
     if scenario.team_car:
-        base = apply_team_driver(base, scenario.team_car.get("driver_archetype"))
+        base = apply_team_driver(base, scenario.team_car.get("driver_archetype"),
+                                 scenario.team_car.get("driver_overrides"))
         team_car_profile = car_profile_from_dict(scenario.team_car["car_profile"])
     profiles = perturb(base, rng)
     result = RaceEngine(scenario, track, profiles,

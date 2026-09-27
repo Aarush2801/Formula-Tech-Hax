@@ -161,16 +161,68 @@ def build_roster(n_cars: int = 22, mix: list[str] | None = None) -> list[DriverP
     return profiles
 
 
+# Apex Passport: the traits a team may set on its own driver, and the bounds
+# they are clamped to. The bounds span the archetype catalogue above with a
+# little room either side -- wide enough to describe a real driver, narrow
+# enough that the decision model is never driven outside the region it was
+# tuned in.
+TEAM_DRIVER_TRAITS: dict[str, dict] = {
+    "aggression": dict(label="Aggression", min=0.0, max=1.0, step=0.01, unit="",
+                       note="How hard the driver presses an advantage."),
+    "risk_tolerance": dict(label="Risk tolerance", min=0.0, max=1.0, step=0.01, unit="",
+                           note="How small a margin the driver will accept."),
+    "overtake_willingness": dict(label="Overtake willingness", min=0.0, max=1.0,
+                                 step=0.01, unit="",
+                                 note="How readily a pass is attempted."),
+    "defensive_tendency": dict(label="Defensive tendency", min=0.0, max=1.0,
+                               step=0.01, unit="",
+                               note="How early the driver moves to cover a line."),
+    "reaction_time": dict(label="Reaction time", min=0.15, max=0.35, step=0.005,
+                          unit="s", note="Perception delay before the driver acts."),
+    "braking_consistency": dict(label="Braking consistency", min=0.3, max=1.0,
+                                step=0.01, unit="",
+                                note="Higher means less lap-to-lap variation."),
+    "late_braking_tendency": dict(label="Late braking", min=0.0, max=1.0, step=0.01,
+                                  unit="", note="How close to the limit braking points sit."),
+    "line_change_tendency": dict(label="Line changes", min=0.0, max=1.0, step=0.01,
+                                 unit="", note="How often the driver changes line."),
+    "error_probability": dict(label="Error rate", min=0.2, max=2.5, step=0.05, unit="×",
+                              note="Multiplier on the global human-error rates."),
+    "predictability": dict(label="Predictability", min=0.1, max=1.0, step=0.01, unit="",
+                           note="Higher means less run-to-run variation in intent."),
+    "pace_multiplier": dict(label="Pace", min=0.97, max=1.03, step=0.001, unit="×",
+                            note="Multiplier on the car's achievable speed."),
+}
+
+
+def clamp_driver_overrides(overrides: dict | None) -> dict[str, float]:
+    """Keeps only known traits, each clamped to its declared bounds."""
+    out: dict[str, float] = {}
+    for key, value in (overrides or {}).items():
+        spec = TEAM_DRIVER_TRAITS.get(key)
+        if spec is None or value is None:
+            continue
+        out[key] = min(spec["max"], max(spec["min"], float(value)))
+    return out
+
+
+def team_driver_traits() -> list[dict]:
+    return [dict(key=k, **v) for k, v in TEAM_DRIVER_TRAITS.items()]
+
+
 def apply_team_driver(
-    roster: list[DriverProfile], archetype: str | None = None
+    roster: list[DriverProfile], archetype: str | None = None,
+    overrides: dict | None = None,
 ) -> list[DriverProfile]:
     """Apex Passport: replace grid slot 0 with the team car's driver.
 
     Only ever called when a scenario explicitly carries a team_car spec, so a
-    scenario without one builds exactly the roster it always did.
+    scenario without one builds exactly the roster it always did. ``overrides``
+    replaces individual traits of the chosen archetype (clamped to
+    TEAM_DRIVER_TRAITS bounds); without it the driver is the plain archetype.
     """
     archetype = archetype or roster[0].archetype
-    a = ARCHETYPES[archetype]
+    a = {**ARCHETYPES[archetype], **clamp_driver_overrides(overrides)}
     team = DriverProfile(
         id="TEAM", name="Team Car", archetype=archetype,
         aggression=a["aggression"], risk_tolerance=a["risk_tolerance"],
@@ -180,7 +232,8 @@ def apply_team_driver(
         late_braking_tendency=a["late_braking_tendency"],
         line_change_tendency=a["line_change_tendency"],
         error_probability=a["error_probability"], predictability=a["predictability"],
-        pace_multiplier=a["pace_multiplier"], provenance="generic_archetype",
+        pace_multiplier=a["pace_multiplier"],
+        provenance="team_custom" if overrides else "generic_archetype",
         note=a["note"],
     )
     return [team] + list(roster[1:])

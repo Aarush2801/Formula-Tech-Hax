@@ -94,3 +94,18 @@ def test_recommendation_language_for_red_part(store, car_id):
     joined = " ".join(result["recommendations"])
     assert "suspension fl" in joined.lower()
     assert "replace" in joined.lower()
+
+
+def test_close_calls_reflect_replays_generated_after_the_batch(store, car_id):
+    result = run_stress_test(store, car_id, n_races=N_RACES_FAST, base_seed=42)
+    replayed = {r["id"] for r in store.q(
+        "SELECT id FROM runs WHERE batch_id=? AND has_replay=1", (result["batch_id"],))}
+    for call in result["close_calls"]:
+        assert call["has_replay"] == (call["run_id"] in replayed)
+
+
+def test_predicted_wear_is_never_below_current_condition(store, car_id):
+    set_part_life(store, car_id, "wheels", 40.0)
+    result = run_stress_test(store, car_id, n_races=N_RACES_FAST, base_seed=42)
+    for p in result["parts"]:
+        assert p["predicted_min_pct"] >= p["current_life_used_pct"]

@@ -18,6 +18,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from .car_profiles import CLASS_PRESETS, car_profile_from_dict, catalogue, from_preset
+from .drivers import team_driver_traits
 from .insurance import (
     build_claim_pack, evidence_pack, evidence_pack_html, insurer_risk_summary,
     list_incidents, log_incident, policy_conditions,
@@ -25,10 +26,10 @@ from .insurance import (
 from .jobs import JOBS, fail_job, finish_job, new_job, progress_for
 from .passport import (
     create_car, get_car, get_history, get_parts, list_cars, replace_part,
-    verify_chain,
+    set_team_driver, verify_chain,
 )
 from .storage import DEFAULT_DB, Store
-from .stress_test import DEFAULT_DRIVER_ARCHETYPE, run_stress_test
+from .stress_test import latest_stress_test, run_stress_test
 
 router = APIRouter(prefix="/api", tags=["passport"])
 
@@ -47,15 +48,22 @@ PASSPORT_DISCLAIMER = (
 # ==========================================================================
 # Cars
 # ==========================================================================
+class TeamDriverRequest(BaseModel):
+    archetype: str | None = None
+    overrides: dict[str, float] | None = None
+
+
 class CarCreateRequest(BaseModel):
     name: str
     car_class: str = "CUSTOM"
     car_profile: dict[str, Any] | None = None
+    team_driver: TeamDriverRequest | None = None
 
 
 @router.get("/car-presets")
 def get_car_presets():
-    return dict(presets=catalogue(), classes=list(CLASS_PRESETS))
+    return dict(presets=catalogue(), classes=list(CLASS_PRESETS),
+                driver_traits=team_driver_traits())
 
 
 @router.get("/cars")
@@ -72,8 +80,22 @@ def api_create_car(req: CarCreateRequest):
     else:
         raise HTTPException(
             400, f"unknown car_class '{req.car_class}' and no car_profile supplied")
-    car_id = create_car(store, req.name, req.car_class, profile)
+    team_driver = req.team_driver.model_dump() if req.team_driver else None
+    try:
+        car_id = create_car(store, req.name, req.car_class, profile, team_driver)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
     return get_car(store, car_id)
+
+
+@router.put("/cars/{car_id}/driver")
+def api_set_team_driver(car_id: str, req: TeamDriverRequest):
+    try:
+        return set_team_driver(store, car_id, req.model_dump())
+    except KeyError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
 
 
 @router.get("/cars/{car_id}/passport")
@@ -151,7 +173,9 @@ class StressTestRequest(BaseModel):
     track_id: str = "vale_park"
     weather: str = "DRY"
     n_races: int | None = Field(None, ge=10, le=5000)
-    driver_archetype: str = DEFAULT_DRIVER_ARCHETYPE
+    # None uses the car's saved team driver; naming an archetype runs this one
+    # test with that plain archetype instead.
+    driver_archetype: str | None = None
     base_seed: int = 600_000
 
 
@@ -186,6 +210,13 @@ def api_stress_test_status(job_id: str):
     snap = job.snapshot()
     snap["result"] = job.result
     return snap
+
+
+@router.get("/cars/{car_id}/stress-tests/latest")
+def api_latest_stress_test(car_id: str):
+    if not get_car(store, car_id):
+        raise HTTPException(404, f"unknown car '{car_id}'")
+    return dict(result=latest_stress_test(store, car_id), note=PASSPORT_DISCLAIMER)
 
 
 # ==========================================================================

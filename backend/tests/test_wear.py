@@ -1,3 +1,5 @@
+import pytest
+
 from apex import assumptions as A
 from apex.wear import estimated_repair_cost, wear_for_race, wear_from_contact, wear_from_kerb_strike
 
@@ -70,3 +72,11 @@ def test_estimated_repair_cost_uses_severe_vs_light_pricing():
     assert light_only == A.CONTACT_REPAIR_COST_LIGHT
     assert severe_only == A.CONTACT_REPAIR_COST_SEVERE
     assert severe_only > light_only
+
+
+def test_separating_contact_never_restores_life():
+    """A contact recorded while the cars are already moving apart has a
+    negative closing speed; it must cost the base wear, not negative wear."""
+    wear = wear_from_contact(dict(impact_speed=-6.0, side="left", severe=False))
+    assert all(v >= 0 for v in wear.values())
+    assert sum(wear.values()) == pytest.approx(A.CONTACT_WEAR_BASE_PCT)
