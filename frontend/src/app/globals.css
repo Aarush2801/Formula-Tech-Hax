@@ -1,0 +1,183 @@
+@import "tailwindcss";
+
+/*
+  APEX design tokens.
+
+  The chart palette is not a taste choice. The categorical slots, the ordinal blue
+  ramp and the status colours below were validated with the data-viz palette
+  validator against this file's own dark surface (#0e1116):
+
+    categorical (8, adjacent pairlist)  all pass — worst adjacent CVD ΔE 8.4,
+                                        worst normal-vision ΔE 19.3, all ≥ 3:1
+    ordinal blue (4 steps)              monotone L, single hue (3° spread)
+    status                              good 5.64:1, warning 10.31:1,
+                                        serious 7.17:1, critical 3.94:1
+
+  Severity is ordered (NORMAL → WARNING → CRITICAL → INCIDENT) and is encoded by
+  colour AND a glyph AND a text label everywhere it appears, so it never depends
+  on hue alone. Conflict *magnitude* uses the blue sequential ramp rather than a
+  warm one, which keeps the status reds reserved for classified severity — a
+  heatmap tinted red would imply a severity the count does not carry.
+*/
+
+:root {
+  color-scheme: dark;
+
+  /* surfaces */
+  --plane:        #080a0e;
+  --surface-1:    #0e1116;
+  --surface-2:    #131926;
+  --surface-3:    #1a2232;
+  --surface-hover:#1d2634;
+
+  /* ink */
+  --text-primary:   #e8eef7;
+  --text-secondary: #9aa7b8;
+  --text-muted:     #6b7889;
+
+  /* chrome */
+  --grid:     #1a2130;
+  --axis:     #2a3444;
+  --border:   #1b2430;
+  --border-strong: #26323f;
+
+  /* categorical series, fixed order — never cycled */
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+
+  /* status — reserved, never reused as a series */
+  --good:     #0ca30c;
+  --warning:  #fab219;
+  --serious:  #ec835a;
+  --critical: #d03b3b;
+
+  /* sequential blue ramp, dark-surface direction (near-zero recedes) */
+  --seq-0: #0d1a2c;
+  --seq-1: #0d366b;
+  --seq-2: #184f95;
+  --seq-3: #256abf;
+  --seq-4: #3987e5;
+  --seq-5: #5598e7;
+  --seq-6: #86b6ef;
+  --seq-7: #b7d3f6;
+
+  --accent: #3987e5;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+               "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+               "Liberation Mono", monospace;
+}
+
+@theme inline {
+  --color-plane: var(--plane);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-ink: var(--text-primary);
+  --color-ink-2: var(--text-secondary);
+  --color-ink-3: var(--text-muted);
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+  --color-grid: var(--grid);
+  --color-axis: var(--axis);
+  --color-accent: var(--accent);
+  --color-good: var(--good);
+  --color-warning: var(--warning);
+  --color-serious: var(--serious);
+  --color-critical: var(--critical);
+  --color-s1: var(--series-1);
+  --color-s2: var(--series-2);
+  --color-s3: var(--series-3);
+  --color-s4: var(--series-4);
+  --color-s5: var(--series-5);
+  --color-s6: var(--series-6);
+  --color-s7: var(--series-7);
+  --color-s8: var(--series-8);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+}
+
+* { border-color: var(--border); }
+
+html, body {
+  background: var(--plane);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  /* A very faint engineering grid. Deliberately below 1.2:1 against the plane so
+     it reads as texture and never competes with data. */
+  background-image:
+    linear-gradient(to right, rgba(94,124,163,0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(94,124,163,0.045) 1px, transparent 1px);
+  background-size: 44px 44px;
+  background-attachment: fixed;
+}
+
+/* Telemetry numerals: tabular so columns and live-updating readouts do not jitter. */
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  letter-spacing: -0.01em;
+}
+
+.label-xs {
+  font-size: 10px;
+  line-height: 1.1;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+/* Focus visibility, kept strong for keyboard users. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: var(--plane); }
+::-webkit-scrollbar-thumb { background: #26323f; border-radius: 5px; }
+::-webkit-scrollbar-thumb:hover { background: #33424f; }
+
+/* Motion is used only where it carries information (cars moving, a search
+   advancing, a value updating). Anyone who has asked for less gets none. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@keyframes apex-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.pulse { animation: apex-pulse 1.6s ease-in-out infinite; }
+
+@keyframes apex-sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(400%); }
+}
+.sweep { animation: apex-sweep 1.4s linear infinite; }
+
+@keyframes apex-fade-up {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.fade-up { animation: apex-fade-up 0.22s ease-out both; }
+
+.tnum { font-variant-numeric: tabular-nums; }
