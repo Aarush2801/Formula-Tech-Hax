@@ -22,8 +22,9 @@ from typing import Any, Callable, Iterator
 import numpy as np
 
 from . import assumptions as A
+from .car_profiles import car_profile_from_dict
 from .circuits import get_track
-from .drivers import build_roster, perturb
+from .drivers import apply_team_driver, build_roster, perturb
 from .engine import RaceEngine
 from .models import Scenario
 from .replay import extract_window, pick_focus
@@ -50,8 +51,15 @@ def build_run(scenario: Scenario) -> tuple[Any, list]:
     track = get_track(scenario.track_id)
     rng = np.random.default_rng(scenario.seed ^ 0x5EED)
     base = build_roster(scenario.n_cars, scenario.field_mix or None)
+    # Apex Passport: scenario.team_car is None on every scenario except a
+    # stress test, so this branch does not run in the base simulator's path.
+    team_car_profile = None
+    if scenario.team_car:
+        base = apply_team_driver(base, scenario.team_car.get("driver_archetype"))
+        team_car_profile = car_profile_from_dict(scenario.team_car["car_profile"])
     profiles = perturb(base, rng)
-    result = RaceEngine(scenario, track, profiles).run()
+    result = RaceEngine(scenario, track, profiles,
+                        team_car_profile=team_car_profile).run()
     return result, profiles
 
 

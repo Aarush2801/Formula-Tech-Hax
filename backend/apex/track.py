@@ -51,16 +51,36 @@ def corner_speed(radius: float, grip: float = 1.0) -> float:
     return float(min(math.sqrt(max(v2, 1.0)), A.MAX_CORNER_SPEED))
 
 
-def lateral_accel_limit(v, grip):
-    """Speed-dependent lateral acceleration ceiling, m/s^2."""
-    mu = A.LATERAL_MU + A.AERO_LATERAL_GAIN * (v / A.AERO_REF_SPEED) ** 2
-    return mu * grip * G
+def lateral_accel_limit(v, grip, mu=None, aero_gain=None):
+    """Speed-dependent lateral acceleration ceiling, m/s^2.
+
+    ``mu``/``aero_gain`` default to the field-wide assumptions; passing
+    per-car arrays (Apex Passport's team car) leaves every other car's result
+    bit-for-bit unchanged, since an array filled uniformly with the default
+    scalar broadcasts identically to that scalar.
+    """
+    mu = A.LATERAL_MU if mu is None else mu
+    aero_gain = A.AERO_LATERAL_GAIN if aero_gain is None else aero_gain
+    eff_mu = mu + aero_gain * (v / A.AERO_REF_SPEED) ** 2
+    return eff_mu * grip * G
 
 
-def brake_accel_limit(v, grip):
-    """Speed-dependent deceleration ceiling, m/s^2."""
+def brake_accel_limit(v, grip, flat_g=None):
+    """Speed-dependent deceleration ceiling, m/s^2.
+
+    ``flat_g`` (per-car array, default None) overrides the speed-dependent
+    formula with a flat ``flat_g * grip * G`` wherever it is not NaN -- used
+    by the Apex Passport team car, whose passport states a single peak
+    braking-g figure rather than a speed-dependent aero curve. None (the
+    default) reproduces today's formula for every car unchanged.
+    """
     mu = A.BRAKE_MU + A.AERO_BRAKE_GAIN * (v / A.AERO_REF_SPEED) ** 2
-    return mu * grip * G
+    dynamic = mu * grip * G
+    if flat_g is None:
+        return dynamic
+    import numpy as np
+    flat = flat_g * grip * G
+    return np.where(np.isnan(flat_g), dynamic, flat)
 
 
 def _integrate(specs: list[SegmentSpec], lengths: np.ndarray, ds: float = 2.0):

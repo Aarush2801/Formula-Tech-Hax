@@ -161,6 +161,31 @@ def build_roster(n_cars: int = 22, mix: list[str] | None = None) -> list[DriverP
     return profiles
 
 
+def apply_team_driver(
+    roster: list[DriverProfile], archetype: str | None = None
+) -> list[DriverProfile]:
+    """Apex Passport: replace grid slot 0 with the team car's driver.
+
+    Only ever called when a scenario explicitly carries a team_car spec, so a
+    scenario without one builds exactly the roster it always did.
+    """
+    archetype = archetype or roster[0].archetype
+    a = ARCHETYPES[archetype]
+    team = DriverProfile(
+        id="TEAM", name="Team Car", archetype=archetype,
+        aggression=a["aggression"], risk_tolerance=a["risk_tolerance"],
+        overtake_willingness=a["overtake_willingness"],
+        defensive_tendency=a["defensive_tendency"], reaction_time=a["reaction_time"],
+        braking_consistency=a["braking_consistency"],
+        late_braking_tendency=a["late_braking_tendency"],
+        line_change_tendency=a["line_change_tendency"],
+        error_probability=a["error_probability"], predictability=a["predictability"],
+        pace_multiplier=a["pace_multiplier"], provenance="generic_archetype",
+        note=a["note"],
+    )
+    return [team] + list(roster[1:])
+
+
 def perturb(
     profiles: list[DriverProfile], rng: np.random.Generator
 ) -> list[DriverProfile]:

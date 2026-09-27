@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from . import assumptions as A
+from .car_profiles import CarProfile
 from .drivers import as_arrays
 from .environment import make_environment, perception_range
 from .errors import ErrorState
@@ -98,6 +99,8 @@ class RunResult:
     laps_completed: float
     segment_conflict_counts: dict
     track_id: str
+    # None unless a team car was present (Apex Passport).
+    team_car_telemetry: dict | None = None
 
 
 class RaceEngine:
@@ -107,6 +110,7 @@ class RaceEngine:
         track: Track,
         profiles: list[DriverProfile],
         record_trajectory: bool = True,
+        team_car_profile: "CarProfile | None" = None,
     ):
         self.sc = scenario
         self.track = track
@@ -130,6 +134,56 @@ class RaceEngine:
         self._is_braking_zone = np.array(
             [sg.is_braking_zone for sg in track.segments], dtype=bool
         )
+
+        # ---- Apex Passport: optional team car -----------------------------
+        # Every per-car physics array below defaults to the field-wide scalar
+        # from assumptions.py, uniformly. An array filled everywhere with the
+        # same value broadcasts identically to that scalar in every numpy
+        # elementwise op used below, so when team_car_profile is None (or no
+        # profile has id "TEAM") this is provably the same computation as
+        # before -- see tests/test_car_profiles.py::test_no_team_car_is_unchanged.
+        n = self.n
+        self.team_idx: int | None = None
+        if team_car_profile is not None:
+            for i, prof in enumerate(profiles):
+                if prof.id == "TEAM":
+                    self.team_idx = i
+                    break
+
+        self.car_mass = np.full(n, A.CAR_MASS)
+        self.engine_power_w = np.full(n, A.ENGINE_POWER)
+        self.traction_accel = np.full(n, A.TRACTION_ACCEL)
+        self.drag_coeff_arr = np.full(n, A.DRAG_COEFF)
+        self.mu_lateral = np.full(n, A.LATERAL_MU)
+        self.aero_lateral_gain = np.full(n, A.AERO_LATERAL_GAIN)
+        self.max_corner_speed_arr = np.full(n, A.MAX_CORNER_SPEED)
+        self.brake_flat_g = np.full(n, np.nan)  # NaN = use the field's dynamic formula
+        self.team_car_profile = team_car_profile
+
+        if self.team_idx is not None:
+            i = self.team_idx
+            cp = team_car_profile
+            self.car_mass[i] = cp.mass_kg
+            self.engine_power_w[i] = cp.power_kw * 1000.0
+            self.traction_accel[i] = A.TRACTION_ACCEL * (
+                cp.tyre_grip_coeff / A.LATERAL_MU
+            )
+            self.drag_coeff_arr[i] = cp.drag_coeff
+            self.mu_lateral[i] = cp.tyre_grip_coeff
+            self.aero_lateral_gain[i] = cp.downforce_coeff
+            self.max_corner_speed_arr[i] = min(
+                A.MAX_CORNER_SPEED, cp.top_speed_kmh / 3.6
+            )
+            self.brake_flat_g[i] = cp.max_brake_g
+
+        # Team-car-only telemetry (spec section 1): kerb strikes, peak g,
+        # braking energy per lap, contacts with impact speed. Populated only
+        # when a team car is present; see _finalise.
+        self.team_kerb_strikes: list[dict] = []
+        self.team_peak_g = 0.0
+        self.team_braking_energy_by_lap: dict[int, float] = {}
+        self.team_contacts: list[dict] = []
+        self.team_was_kerb = False
 
     # ======================================================================
     # Initial conditions
@@ -170,7 +224,9 @@ class RaceEngine:
 
         # Start at the local speed ceiling, scaled by pace and a small spread.
         R = geo.radius(s)
-        vcap = self._corner_speed(R, np.full(n, self.env.grip))
+        vcap = self._corner_speed(R, np.full(n, self.env.grip), mu=self.mu_lateral,
+                                  aero_gain=self.aero_lateral_gain,
+                                  max_speed=self.max_corner_speed_arr)
         pace = 1.0 + (self.p["pace_multiplier"] - 1.0) * self.sc.pace_spread
         v = np.minimum(vcap, 92.0) * pace * (1.0 + rng.normal(0.0, 0.012, n))
 
@@ -237,18 +293,25 @@ class RaceEngine:
     # Vehicle limits
     # ======================================================================
     @staticmethod
-    def _corner_speed(R: np.ndarray, grip: np.ndarray) -> np.ndarray:
-        k, vref2 = A.AERO_LATERAL_GAIN, A.AERO_REF_SPEED ** 2
+    def _corner_speed(R: np.ndarray, grip: np.ndarray, mu=None, aero_gain=None,
+                      max_speed=None) -> np.ndarray:
+        # mu/aero_gain/max_speed default to the field-wide scalars; passing
+        # per-car arrays (broadcast-shaped by the caller) is what gives the
+        # Apex Passport team car its own cornering limit without touching
+        # anyone else's -- see the equivalence note on RaceEngine.__init__.
+        mu = A.LATERAL_MU if mu is None else mu
+        aero_gain = A.AERO_LATERAL_GAIN if aero_gain is None else aero_gain
+        max_speed = A.MAX_CORNER_SPEED if max_speed is None else max_speed
+        k, vref2 = aero_gain, A.AERO_REF_SPEED ** 2
         denom = 1.0 - grip * k * G * R / vref2
         safe = np.maximum(denom, 1e-3)
-        v2 = A.LATERAL_MU * grip * G * R / safe
+        v2 = mu * grip * G * R / safe
         v = np.sqrt(np.maximum(v2, 1.0))
-        return np.where(denom <= 1e-3, A.MAX_CORNER_SPEED,
-                        np.minimum(v, A.MAX_CORNER_SPEED))
+        return np.where(denom <= 1e-3, max_speed, np.minimum(v, max_speed))
 
     def _drag_accel(self, v: np.ndarray, slip: np.ndarray) -> np.ndarray:
-        cd = A.DRAG_COEFF * (1.0 - A.SLIPSTREAM_GAIN * slip)
-        return 0.5 * A.AIR_DENSITY * cd * v * v / A.CAR_MASS
+        cd = self.drag_coeff_arr * (1.0 - A.SLIPSTREAM_GAIN * slip)
+        return 0.5 * A.AIR_DENSITY * cd * v * v / self.car_mass
 
     # ======================================================================
     # Main loop
@@ -339,12 +402,15 @@ class RaceEngine:
             )
             grip = grip * (1.0 - A.DIRTY_AIR_GRIP_LOSS * slip)
 
-            a_brake_max = brake_accel_limit(self.v, grip)
-            a_lat_max = lateral_accel_limit(self.v, grip)
+            a_brake_max = brake_accel_limit(self.v, grip, flat_g=self.brake_flat_g)
+            a_lat_max = lateral_accel_limit(self.v, grip, mu=self.mu_lateral,
+                                            aero_gain=self.aero_lateral_gain)
 
             # ---- 4. what must I brake for? -------------------------------
             R_probe = geo.probe_radius(self.s, self.lookahead)
-            vcap = self._corner_speed(R_probe, grip[:, None])
+            vcap = self._corner_speed(R_probe, grip[:, None], mu=self.mu_lateral[:, None],
+                                      aero_gain=self.aero_lateral_gain[:, None],
+                                      max_speed=self.max_corner_speed_arr[:, None])
             pace = 1.0 + (self.p["pace_multiplier"] - 1.0) * self.sc.pace_spread
             vcap = vcap * pace[:, None] * A.CORNER_SPEED_MARGIN
             dist_eff = np.maximum(
@@ -619,8 +685,8 @@ class RaceEngine:
 
             # ---- 6. integrate --------------------------------------------
             drag = self._drag_accel(self.v, slip)
-            a_pow = np.minimum(A.TRACTION_ACCEL * grip,
-                               A.ENGINE_POWER / (A.CAR_MASS * np.maximum(self.v, 8.0)))
+            a_pow = np.minimum(self.traction_accel * grip,
+                               self.engine_power_w / (self.car_mass * np.maximum(self.v, 8.0)))
             throttle = np.where(brake_level > 0.02, 0.0,
                                 np.where(self.v < v_target * 0.995, 1.0, 0.25))
             accel = throttle * a_pow - drag - brake_level * a_brake_max
@@ -671,6 +737,18 @@ class RaceEngine:
             decel = np.maximum(-self.a, 0.0)
             self.max_decel = max(self.max_decel, float(decel.max()))
 
+            # ---- Apex Passport: team car telemetry (peak g, braking energy) --
+            if self.team_idx is not None:
+                i = self.team_idx
+                combined_g = float(np.sqrt(decel[i] ** 2 + lat_need[i] ** 2) / G)
+                self.team_peak_g = max(self.team_peak_g, combined_g)
+                if decel[i] > 0.5:  # meaningful braking, not a lift-off
+                    energy_j = float(self.car_mass[i] * decel[i] * prev_v[i] * dt)
+                    lap_i = int(self.lap[i])
+                    self.team_braking_energy_by_lap[lap_i] = (
+                        self.team_braking_energy_by_lap.get(lap_i, 0.0) + energy_j
+                    )
+
             # ---- 7. excursions, barriers, contact ------------------------
             off = np.abs(self.d) > halfw
             newly_off = off & ~self.was_off
@@ -697,6 +775,31 @@ class RaceEngine:
             self.d = np.clip(self.d, -(halfw + runoff), halfw + runoff)
             self.lat_rate = np.where(off, self.lat_rate * 0.4, self.lat_rate)
             self.was_off = off
+
+            # ---- Apex Passport: team car kerb-strike proxy --------------------
+            # This engine has no explicit kerb geometry, only track width and
+            # off-track/barrier thresholds. A kerb strike is approximated as
+            # running beyond KERB_EDGE_FRAC of the half-width while still
+            # technically on track -- the zone a real kerb occupies on most
+            # circuits. Severity scales with how far past that fraction and is
+            # a labelled proxy, not a measured kerb-load figure.
+            if self.team_idx is not None:
+                i = self.team_idx
+                KERB_EDGE_FRAC = 0.85
+                on_kerb = (not bool(off[i])) and abs(float(self.d[i])) > halfw[i] * KERB_EDGE_FRAC
+                if on_kerb and not self.team_was_kerb:
+                    severity = float(np.clip(
+                        (abs(float(self.d[i])) / halfw[i] - KERB_EDGE_FRAC) / (1.0 - KERB_EDGE_FRAC),
+                        0.0, 1.0,
+                    ))
+                    self.team_kerb_strikes.append(dict(
+                        t=round(float(t), 3), segment_index=int(seg[i]),
+                        location=self.track.segments[int(seg[i])].name,
+                        lateral_offset=round(float(self.d[i]), 2),
+                        half_width=round(float(halfw[i]), 2),
+                        speed=round(float(self.v[i]), 1), severity=round(severity, 3),
+                    ))
+                self.team_was_kerb = on_kerb
 
             for i in np.nonzero(self.err.spinning & ~self.spun)[0]:
                 self.spun[i] = True
@@ -760,6 +863,15 @@ class RaceEngine:
                     in_corner=bool(geo.seg_is_corner[seg[i]]),
                     lateral_grip_budget=round(float(lat_capacity[i]), 3),
                 )
+                if self.team_idx is not None and self.team_idx in (int(i), int(j)):
+                    self.team_contacts.append(dict(
+                        t=round(float(t), 3), segment_index=int(seg[i]),
+                        location=self.track.segments[int(seg[i])].name,
+                        other_driver=self.profiles[int(j if i == self.team_idx else i)].id,
+                        severe=bool(severe), impact_speed=round(cs, 2),
+                        **{k: detail[k] for k in
+                           ("longitudinal_overlap", "lateral_overlap_depth", "in_corner")},
+                    ))
                 if severe:
                     self.n_collisions += 1
                     self.acc.mark_collision(int(i), int(j))
@@ -942,6 +1054,21 @@ class RaceEngine:
         conflicts.sort(key=lambda c: c["min_ttc"])
         min_pet_overall = None if self.pet.min_pet >= INF else round(self.pet.min_pet, 4)
 
+        team_telemetry = None
+        if self.team_idx is not None:
+            team_telemetry = dict(
+                driver_index=self.team_idx,
+                car_profile=self.team_car_profile.to_dict(),
+                kerb_strikes=self.team_kerb_strikes,
+                n_kerb_strikes=len(self.team_kerb_strikes),
+                peak_g=round(self.team_peak_g, 3),
+                braking_energy_by_lap_j={
+                    k: round(v, 1) for k, v in self.team_braking_energy_by_lap.items()
+                },
+                contacts=self.team_contacts,
+                n_contacts=len(self.team_contacts),
+            )
+
         return RunResult(
             scenario=self.sc,
             environment=self.env,
@@ -975,4 +1102,5 @@ class RaceEngine:
             laps_completed=float(self.dist_total.max() / self.L),
             segment_conflict_counts=self.seg_conflicts,
             track_id=self.track.id,
+            team_car_telemetry=team_telemetry,
         )

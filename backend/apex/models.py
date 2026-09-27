@@ -220,6 +220,13 @@ class Scenario:
     parent_id: str | None = None      # set when produced by mutation
     generation: int = 0
     origin: str = "monte_carlo"       # monte_carlo | guided | manual | intervention
+    # Apex Passport: optional team car. None (the default) means every car is
+    # field-generated exactly as before -- see engine.RaceEngine.__init__ for
+    # the equivalence this preserves. When set: {"car_profile": {...CarProfile
+    # fields...}, "driver_archetype": "<ARCHETYPE_ID>"}. Grid slot 0 is
+    # replaced with a driver of id "TEAM" using that archetype as its
+    # starting personality.
+    team_car: dict[str, Any] | None = None
 
     def to_dict(self) -> dict:
         d = asdict(self)
